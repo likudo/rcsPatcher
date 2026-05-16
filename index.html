@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RCS Format Diff Patcher</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background-color: #1e1e1e;
+            color: #e0e0e0;
+            margin: 0;
+            padding: 40px 20px;
+            display: flex;
+            justify-content: center;
+        }
+        .container {
+            width: 100%;
+            max-width: 800px;
+            background-color: #2d2d2d;
+            padding: 30px;
+            border-radius: 8px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.3);
+        }
+        h1 {
+            font-size: 24px;
+            margin-top: 0;
+            margin-bottom: 20px;
+            color: #ffffff;
+            border-bottom: 1px solid #444;
+            padding-bottom: 10px;
+        }
+        .form-group {
+            margin-bottom: 20px;
+        }
+        label {
+            display: block;
+            font-weight: bold;
+            margin-bottom: 8px;
+            color: #b0b0b0;
+        }
+        input[type="file"] {
+            display: block;
+            width: 100%;
+            padding: 10px;
+            background-color: #3a3a3a;
+            border: 1px solid #555;
+            border-radius: 4px;
+            color: #fff;
+            box-sizing: border-box;
+        }
+        textarea {
+            width: 100%;
+            height: 200px;
+            background-color: #1e1e1e;
+            border: 1px solid #555;
+            border-radius: 4px;
+            color: #d4d4d4;
+            font-family: "Courier New", Courier, monospace;
+            padding: 12px;
+            box-sizing: border-box;
+            resize: vertical;
+        }
+        button {
+            display: inline-block;
+            background-color: #007acc;
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            font-size: 16px;
+            font-weight: bold;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: background-color 0.2s;
+        }
+        button:hover {
+            background-color: #0062a3;
+        }
+        .status {
+            margin-top: 15px;
+            font-weight: bold;
+        }
+        .success { color: #4caf50; }
+        .error { color: #f44336; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h1>RCS Format Diff Patcher</h1>
+    
+    <!-- 1. 파일 선택 -->
+    <div class="form-group">
+        <label for="originalFile">1. 원본 파일 선택 (Original File)</label>
+        <input type="file" id="originalFile">
+    </div>
+    
+    <!-- 2. Diff 값 붙여넣기 -->
+    <div class="form-group">
+        <label for="diffText">2. RCS Format Diff 붙여넣기</label>
+        <textarea id="diffText" placeholder="예시:&#10;d10 2&#10;a12 1&#10;추가할 내용..."></textarea>
+    </div>
+    
+    <!-- 3. 적용 버튼 -->
+    <button id="applyBtn">Apply & Download</button>
+    
+    <div id="statusMessage" class="status"></div>
+</div>
+
+<script>
+document.getElementById('applyBtn').addEventListener('click', function() {
+    const fileInput = document.getElementById('originalFile');
+    const diffText = document.getElementById('diffText').value;
+    const statusMsg = document.getElementById('statusMessage');
+    
+    statusMsg.className = 'status';
+    statusMsg.textContent = '';
+
+    if (!fileInput.files || fileInput.files.length === 0) {
+        statusMsg.className = 'status error';
+        statusMsg.textContent = '❌ 원본 파일을 선택해주세요.';
+        return;
+    }
+    if (!diffText.trim()) {
+        statusMsg.className = 'status error';
+        statusMsg.textContent = '❌ RCS Diff 내용을 입력해주세요.';
+        return;
+    }
+
+    const file = fileInput.files[0];
+    const reader = new FileReader();
+
+    reader.onload = function(e) {
+        try {
+            const originalContent = e.target.result;
+            const patchedContent = applyRcsDiff(originalContent, diffText);
+            
+            // 파일 다운로드 트리거
+            downloadFile(patchedContent, "patched_" + file.name);
+            
+            statusMsg.className = 'status success';
+            statusMsg.textContent = '✅ 패치가 성공적으로 적용되어 다운로드되었습니다!';
+        } catch (err) {
+            statusMsg.className = 'status error';
+            statusMsg.textContent = '❌ 패치 적용 중 오류 발생: ' + err.message;
+        }
+    };
+
+    reader.onerror = function() {
+        statusMsg.className = 'status error';
+        statusMsg.textContent = '❌ 파일을 읽는 중 오류가 발생했습니다.';
+    };
+
+    reader.readAsText(file, 'UTF-8');
+});
+
+// RCS Format Diff 적용 핵심 로직
+function applyRcsDiff(original, diff) {
+    let lines = original.split(/\r?\n/);
+    let diffLines = diff.split(/\r?\n/);
+    let operations = [];
+    let i = 0;
+
+    // Diff 파싱
+    while (i < diffLines.length) {
+        let diffLine = diffLines[i];
+        if (!diffLine.trim()) {
+            i++;
+            continue;
+        }
+
+        let match = diffLine.match(/^([ad])(\d+)\s+(\d+)/);
+        if (!match) {
+            i++;
+            continue; // 올바르지 않은 라인은 건너뜀
+        }
+
+        let op = match[1];
+        let start = parseInt(match[2], 10);
+        let count = parseInt(match[3], 10);
+        i++;
+
+        if (op === 'd') {
+            operations.push({ op: 'd', line: start, count: count });
+        } else if (op === 'a') {
+            let addedLines = [];
+            for (let j = 0; j < count; j++) {
+                if (i < diffLines.length) {
+                    addedLines.push(diffLines[i]);
+                    i++;
+                }
+            }
+            operations.push({ op: 'a', line: start, lines: addedLines });
+        }
+    }
+
+    // 파일 하단(역순)부터 반영하여 라인 인덱스 꼬임 방지
+    operations.sort((a, b) => b.line - a.line);
+
+    for (let op of operations) {
+        let start = op.line;
+        if (op.op === 'd') {
+            // 1-based index를 0-based로 변환하여 삭제
+            lines.splice(start - 1, op.count);
+        } else if (op.op === 'a') {
+            // start 라인 뒤에 내용 삽입
+            lines.splice(start, 0, ...op.lines);
+        }
+    }
+
+    return lines.join('\n');
+}
+
+// 브라우저 다운로드 실행 함수
+function downloadFile(content, fileName) {
+    const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = fileName;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+}
+</script>
+
+</body>
+</html>
